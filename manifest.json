@@ -1,6 +1,6 @@
 {
-  "name": "Expense Dashboard",
-  "short_name": "Expenses",
+  "name": "Money Matters",
+  "short_name": "Money Matters",
   "description": "Personal expenses, income, savings and net worth tracker",
   "start_url": "./index.html",
   "scope": "./",
