@@ -7,6 +7,25 @@ const ASSET_CATEGORY_ICONS = {bank_savings:'wallet', fixed_deposit:'lock', stock
 
 function icon(name, cls){ return `<svg class="icon ${cls||''}"><use href="#icon-${name}"></use></svg>`; }
 
+const valueState = new Map();
+function animateValue(el, to, formatter, duration=700){
+  if (!el) return;
+  const prev = valueState.get(el) || {value:0, gen:0};
+  const gen = prev.gen + 1;
+  const from = prev.value;
+  valueState.set(el, {value:to, gen});
+  if (Math.abs(to-from) < 0.005) { el.textContent = formatter(to); return; }
+  const start = performance.now();
+  function tick(now){
+    if ((valueState.get(el)||{}).gen !== gen) return;
+    const t = Math.min(1, (now-start)/duration);
+    const eased = 1 - Math.pow(1-t, 3);
+    el.textContent = formatter(from + (to-from)*eased);
+    if (t < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
 let adapter = null;
 let transactions = [];
 let assets = [];
@@ -112,14 +131,14 @@ function renderSummary(){
   const expense = list.filter(t => t.type === 'expense').reduce((s,t) => s + Number(t.amount), 0);
   const savings = income - expense;
   const rate = income > 0 ? (savings / income * 100) : 0;
-  document.getElementById('sumIncome').textContent = fmtMoney(income);
-  document.getElementById('sumExpense').textContent = fmtMoney(expense);
+  animateValue(document.getElementById('sumIncome'), income, fmtMoney);
+  animateValue(document.getElementById('sumExpense'), expense, fmtMoney);
   const savEl = document.getElementById('sumSavings');
-  savEl.textContent = fmtMoney(savings);
+  animateValue(savEl, savings, fmtMoney);
   savEl.classList.toggle('negative', savings < 0);
   savEl.classList.toggle('positive', savings >= 0);
   const rateEl = document.getElementById('sumRate');
-  rateEl.textContent = rate.toFixed(1) + '%';
+  animateValue(rateEl, rate, v => v.toFixed(1) + '%');
   rateEl.classList.toggle('negative', rate < 0);
   rateEl.classList.toggle('positive', rate >= 0);
 }
@@ -179,18 +198,36 @@ function renderMonthlyBar(){
   document.getElementById('monthlyBarWrap').innerHTML = svg;
 }
 
+function smoothPath(pts){
+  if (pts.length < 2) return '';
+  if (pts.length === 2) return `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)} L${pts[1][0].toFixed(1)},${pts[1][1].toFixed(1)}`;
+  let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+  for (let i=0; i<pts.length-1; i++){
+    const p0 = pts[i===0?0:i-1], p1 = pts[i], p2 = pts[i+1], p3 = pts[Math.min(i+2,pts.length-1)];
+    const cp1x = p1[0]+(p2[0]-p0[0])/6, cp1y = p1[1]+(p2[1]-p0[1])/6;
+    const cp2x = p2[0]-(p3[0]-p1[0])/6, cp2y = p2[1]-(p3[1]-p1[1])/6;
+    d += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+  }
+  return d;
+}
+
+let chartIdSeq = 0;
 function lineChartSvg(labels, values, color){
   const w=600, h=180, pad=30;
   const maxV = Math.max(1, ...values);
   const stepX = values.length > 1 ? (w-2*pad)/(values.length-1) : 0;
   const pts = values.map((v,i) => [pad + i*stepX, h-pad - (v/maxV)*(h-2*pad)]);
+  const gradId = 'lineGrad' + (chartIdSeq++);
   let svg = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="200" preserveAspectRatio="xMinYMid meet">`;
+  svg += `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.32"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>`;
   svg += `<line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="var(--border)"/>`;
   if (pts.length > 0) {
-    const linePath = pts.map((p,i) => (i===0?'M':'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
-    const areaPath = linePath + ` L${pts[pts.length-1][0].toFixed(1)},${h-pad} L${pts[0][0].toFixed(1)},${h-pad} Z`;
-    svg += `<path d="${areaPath}" fill="${color}22" stroke="none"/>`;
-    svg += `<path d="${linePath}" fill="none" stroke="${color}" stroke-width="2"/>`;
+    const linePath = smoothPath(pts);
+    const areaPath = `${linePath} L${pts[pts.length-1][0].toFixed(1)},${h-pad} L${pts[0][0].toFixed(1)},${h-pad} Z`;
+    svg += `<path d="${areaPath}" fill="url(#${gradId})" stroke="none"/>`;
+    svg += `<path d="${linePath}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="drop-shadow(0 2px 4px ${color}55)"/>`;
+    const last = pts[pts.length-1];
+    svg += `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="4.5" fill="${color}" stroke="var(--card-bg)" stroke-width="2"/>`;
   }
   svg += `<text x="${pad}" y="${h-8}" class="axis-label">${labels[0] ? labels[0] : ''}</text>`;
   svg += `<text x="${w-pad}" y="${h-8}" text-anchor="end" class="axis-label">${labels[labels.length-1] ? labels[labels.length-1] : ''}</text>`;
@@ -411,10 +448,10 @@ function renderNetWorthSummary(){
   const byCat = {bank_savings:0, fixed_deposit:0, stocks_funds:0, other:0};
   let total = 0;
   assets.forEach(a => { const bal = currentBalance(a.id); byCat[a.category] = (byCat[a.category]||0) + bal; total += bal; });
-  document.getElementById('nwTotal').textContent = fmtMoney(total);
-  document.getElementById('nwBank').textContent = fmtMoney(byCat.bank_savings);
-  document.getElementById('nwFixed').textContent = fmtMoney(byCat.fixed_deposit);
-  document.getElementById('nwStocks').textContent = fmtMoney(byCat.stocks_funds);
+  animateValue(document.getElementById('nwTotal'), total, fmtMoney);
+  animateValue(document.getElementById('nwBank'), byCat.bank_savings, fmtMoney);
+  animateValue(document.getElementById('nwFixed'), byCat.fixed_deposit, fmtMoney);
+  animateValue(document.getElementById('nwStocks'), byCat.stocks_funds, fmtMoney);
 }
 
 function renderNetWorthDonut(){
@@ -550,6 +587,10 @@ function openAssetDetail(assetId){
 // ---------- Wiring ----------
 
 function wireEventListeners(){
+  window.addEventListener('scroll', () => {
+    document.querySelector('.topbar').classList.toggle('scrolled', window.scrollY > 8);
+  }, {passive:true});
+
   document.querySelectorAll('#txTable th[data-sort]').forEach(th => {
     th.addEventListener('click', () => {
       const col = th.dataset.sort;
