@@ -3,6 +3,9 @@ import { createDataAdapter } from './data-adapter.js';
 const THEME_KEY = 'expenseDashboard_theme';
 const PALETTE = ['#6366f1','#06b6d4','#f59e0b','#ef4444','#10b981','#8b5cf6','#ec4899','#14b8a6','#f97316','#3b82f6','#84cc16','#a855f7','#eab308','#0ea5e9','#f43f5e','#22c55e'];
 const ASSET_CATEGORY_LABELS = {bank_savings:'Bank Savings', fixed_deposit:'Fixed Deposit', stocks_funds:'Stocks & Funds', other:'Other'};
+const ASSET_CATEGORY_ICONS = {bank_savings:'wallet', fixed_deposit:'lock', stocks_funds:'barchart', other:'gem'};
+
+function icon(name, cls){ return `<svg class="icon ${cls||''}"><use href="#icon-${name}"></use></svg>`; }
 
 let adapter = null;
 let transactions = [];
@@ -248,8 +251,8 @@ function renderTable(){
       <td>${escapeHtml(t.method)}</td>
       <td class="notes" title="${escapeAttr(t.notes)}">${escapeHtml(t.notes)}</td>
       <td class="actions">
-        <button class="icon-btn edit-btn" data-id="${t.id}">Edit</button>
-        <button class="icon-btn delete-btn" data-id="${t.id}">Delete</button>
+        <button class="icon-btn edit-btn" data-id="${t.id}" title="Edit">${icon('edit')}</button>
+        <button class="icon-btn delete-btn" data-id="${t.id}" title="Delete">${icon('trash')}</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="8" class="empty">No transactions found</td></tr>';
 
@@ -370,16 +373,19 @@ function resetToImported(){
   import('./seed-data.js').then(({SEED_TRANSACTIONS}) => adapter.transactions.replaceAll(SEED_TRANSACTIONS.slice()));
 }
 
+function setThemeButtonLabel(t){
+  document.getElementById('themeToggle').innerHTML = (t === 'dark' ? icon('sun') + ' Light mode' : icon('moon') + ' Dark mode');
+}
 function loadTheme(){
   const t = localStorage.getItem(THEME_KEY) || 'light';
   document.documentElement.dataset.theme = t;
-  document.getElementById('themeToggle').textContent = t === 'dark' ? 'Light mode' : 'Dark mode';
+  setThemeButtonLabel(t);
 }
 function toggleTheme(){
   const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.theme = next;
   localStorage.setItem(THEME_KEY, next);
-  document.getElementById('themeToggle').textContent = next === 'dark' ? 'Light mode' : 'Dark mode';
+  setThemeButtonLabel(next);
   render(); renderNetWorth();
 }
 
@@ -461,14 +467,14 @@ function renderAssetGrid(){
           <div class="asset-name">${escapeHtml(a.name)}</div>
           <div class="asset-meta">${escapeHtml(a.institution||'')}</div>
         </div>
-        <span class="category-pill">${escapeHtml(ASSET_CATEGORY_LABELS[a.category]||a.category)}</span>
+        <span class="category-pill">${icon(ASSET_CATEGORY_ICONS[a.category]||'gem')}${escapeHtml(ASSET_CATEGORY_LABELS[a.category]||a.category)}</span>
       </div>
       <div class="asset-balance">${fmtMoney(bal)}</div>
       <div class="asset-actions">
-        <button class="icon-btn add-entry-btn" data-id="${a.id}">+ Entry</button>
-        <button class="icon-btn history-btn" data-id="${a.id}">History</button>
-        <button class="icon-btn edit-asset-btn" data-id="${a.id}">Edit</button>
-        <button class="icon-btn delete-asset-btn" data-id="${a.id}">Delete</button>
+        <button class="icon-btn add-entry-btn" data-id="${a.id}">${icon('plus')} Entry</button>
+        <button class="icon-btn history-btn" data-id="${a.id}">${icon('clock')} History</button>
+        <button class="icon-btn edit-asset-btn" data-id="${a.id}">${icon('edit')} Edit</button>
+        <button class="icon-btn delete-asset-btn" data-id="${a.id}">${icon('trash')} Delete</button>
       </div>
     </div>`;
   }).join('') || '<div class="empty">No accounts or investments yet. Click "+ Add Account/Investment" to start.</div>';
@@ -532,7 +538,7 @@ function openAssetDetail(assetId){
         <td>${escapeHtml(e.kind)}</td>
         <td>${fmtMoney(e.amount)}</td>
         <td>${escapeHtml(e.note||'')}</td>
-        <td><button class="icon-btn delete-entry-btn" data-id="${e.id}">Delete</button></td>
+        <td><button class="icon-btn delete-entry-btn" data-id="${e.id}" title="Delete">${icon('trash')}</button></td>
       </tr>`).join('') || '<tr><td colspan="5" class="empty">No entries yet</td></tr>'}
     </tbody></table>`;
   document.querySelectorAll('.delete-entry-btn').forEach(b => b.onclick = () => {
