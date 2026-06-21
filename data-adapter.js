@@ -52,8 +52,9 @@ async function buildCloudAdapter() {
   const app = initializeApp(firebaseConfig);
   const auth = authMod.getAuth(app);
   await authMod.setPersistence(auth, authMod.browserLocalPersistence);
-  const db = fsMod.getFirestore(app);
-  try { await fsMod.enableIndexedDbPersistence(db); } catch(e) { /* multiple tabs open, ignore */ }
+  const db = fsMod.initializeFirestore(app, {
+    localCache: fsMod.persistentLocalCache({tabManager: fsMod.persistentMultipleTabManager()})
+  });
 
   let uid = null;
 
