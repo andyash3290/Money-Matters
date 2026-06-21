@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Expense Dashboard</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#6366f1">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Expenses">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="signinScreen" class="hidden">
+  <div class="signin-box">
+    <h2>Expense Dashboard</h2>
+    <p class="subtitle">Sign in to access your synced data.</p>
+    <form id="signinForm">
+      <label>Email <input type="email" id="siEmail" required autocomplete="username"></label>
+      <label>Password <input type="password" id="siPassword" required autocomplete="current-password"></label>
+      <button type="submit" class="btn-primary" style="width:100%">Sign In</button>
+      <div class="signin-error" id="siError"></div>
+    </form>
+  </div>
+</div>
+
+<div id="mainApp" class="hidden">
+<div class="app">
+  <header class="topbar">
+    <div>
+      <div class="brand">Expense Dashboard</div>
+      <div class="subtitle" id="subtitle"></div>
+    </div>
+    <div class="header-actions">
+      <span class="sync-badge" id="syncBadge"></span>
+      <button id="themeToggle">Dark mode</button>
+      <button id="exportJsonBtn">Backup (JSON)</button>
+      <button id="importBtn">Import</button>
+      <button id="resetBtn">Reset to imported data</button>
+      <button id="signoutBtn" class="hidden">Sign Out</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="expenses">Expenses</button>
+    <button class="tab-btn" data-tab="networth">Net Worth</button>
+  </nav>
+
+  <section class="tab-panel active" id="tab-expenses">
+    <div class="filter-bar">
+      <div class="presets">
+        <button data-preset="thisMonth">This Month</button>
+        <button data-preset="lastMonth">Last Month</button>
+        <button data-preset="last3">Last 3 Months</button>
+        <button data-preset="thisYear">This Year</button>
+        <button data-preset="all">All Time</button>
+      </div>
+      <div class="custom-range">
+        <input type="date" id="rangeStart"> <span>to</span> <input type="date" id="rangeEnd">
+        <button id="applyRange">Apply</button>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <button id="addBtn" class="btn-primary">+ Add Transaction</button>
+    </div>
+
+    <section class="summary-cards">
+      <div class="card income"><div class="card-label">Income</div><div class="card-value" id="sumIncome">-</div></div>
+      <div class="card expense"><div class="card-label">Expenses</div><div class="card-value" id="sumExpense">-</div></div>
+      <div class="card savings"><div class="card-label">Savings (this period)</div><div class="card-value" id="sumSavings">-</div></div>
+      <div class="card rate"><div class="card-label">Savings Rate</div><div class="card-value" id="sumRate">-</div></div>
+    </section>
+
+    <section class="charts-grid">
+      <div class="panel">
+        <h3>Expenses by Category</h3>
+        <div id="donutWrap"></div>
+        <div id="donutLegend" class="legend"></div>
+      </div>
+      <div class="panel">
+        <h3>Income vs Expenses</h3>
+        <div class="chart-legend-inline"><span class="dot" style="background:#10b981"></span> Income &nbsp; <span class="dot" style="background:#ef4444"></span> Expense</div>
+        <div id="monthlyBarWrap"></div>
+      </div>
+      <div class="panel wide">
+        <h3>Daily Spending Trend</h3>
+        <div id="trendWrap"></div>
+      </div>
+      <div class="panel wide">
+        <h3>Spending by Payment Method</h3>
+        <div id="methodBars"></div>
+      </div>
+    </section>
+
+    <section class="table-section">
+      <div class="table-controls">
+        <input type="text" id="searchBox" placeholder="Search description, notes or category...">
+        <select id="filterType"><option value="">All Types</option><option value="income">Income</option><option value="expense">Expense</option></select>
+        <select id="filterCategory"><option value="">All Categories</option></select>
+        <select id="filterMethod"><option value="">All Methods</option></select>
+        <button id="clearFilters">Clear Filters</button>
+        <button id="exportCsv">Export CSV</button>
+      </div>
+      <table id="txTable">
+        <thead>
+          <tr>
+            <th data-sort="date">Date</th>
+            <th data-sort="type">Type</th>
+            <th data-sort="category">Category</th>
+            <th>Description</th>
+            <th data-sort="amount">Amount</th>
+            <th data-sort="method">Method</th>
+            <th>Notes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="txTbody"></tbody>
+      </table>
+      <div class="pagination" id="pagination"></div>
+    </section>
+  </section>
+
+  <section class="tab-panel" id="tab-networth">
+    <section class="summary-cards" id="nwSummaryCards">
+      <div class="card"><div class="card-label">Total Net Worth</div><div class="card-value" id="nwTotal">-</div></div>
+      <div class="card"><div class="card-label">Bank Savings</div><div class="card-value" id="nwBank">-</div></div>
+      <div class="card"><div class="card-label">Fixed Deposits</div><div class="card-value" id="nwFixed">-</div></div>
+      <div class="card"><div class="card-label">Stocks & Funds</div><div class="card-value" id="nwStocks">-</div></div>
+    </section>
+
+    <section class="charts-grid">
+      <div class="panel wide">
+        <h3>Net Worth Over Time</h3>
+        <div id="nwTrendWrap"></div>
+      </div>
+      <div class="panel">
+        <h3>By Category</h3>
+        <div id="nwDonutWrap"></div>
+        <div id="nwDonutLegend" class="legend"></div>
+      </div>
+      <div class="panel">
+        <h3>By Account</h3>
+        <div id="nwAccountBars"></div>
+      </div>
+    </section>
+
+    <section class="table-section">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h3 style="margin:0;">Accounts & Investments</h3>
+        <button id="addAssetBtn" class="btn-primary">+ Add Account/Investment</button>
+      </div>
+      <div class="asset-grid" id="assetGrid"></div>
+    </section>
+  </section>
+</div>
+</div>
+
+<div id="modalOverlay" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 id="modalTitle">Add Transaction</h3>
+    <form id="txForm">
+      <label>Type
+        <select id="fType"><option value="expense">Expense</option><option value="income">Income</option></select>
+      </label>
+      <label>Date
+        <input type="date" id="fDate" required>
+      </label>
+      <label>Category
+        <input list="categoryList" id="fCategory" required autocomplete="off">
+      </label>
+      <datalist id="categoryList"></datalist>
+      <label>Description
+        <input id="fDescription" autocomplete="off">
+      </label>
+      <label>Amount (AED)
+        <input type="number" id="fAmount" step="0.01" min="0" required>
+      </label>
+      <label>Payment Method
+        <input list="methodList" id="fMethod" autocomplete="off">
+      </label>
+      <datalist id="methodList"></datalist>
+      <label>Notes
+        <input id="fNotes" autocomplete="off">
+      </label>
+      <div class="modal-actions">
+        <button type="button" id="cancelBtn">Cancel</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="assetModalOverlay" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 id="assetModalTitle">Add Account/Investment</h3>
+    <form id="assetForm">
+      <label>Name
+        <input id="aName" placeholder="e.g. RAK Bank Savings" required autocomplete="off">
+      </label>
+      <label>Category
+        <select id="aCategory">
+          <option value="bank_savings">Bank Savings</option>
+          <option value="fixed_deposit">Fixed/Term Deposit</option>
+          <option value="stocks_funds">Stocks & Mutual Funds</option>
+          <option value="other">Other (Gold/Crypto/Retirement)</option>
+        </select>
+      </label>
+      <label>Institution
+        <input id="aInstitution" placeholder="e.g. RAK Bank" autocomplete="off">
+      </label>
+      <div class="modal-actions">
+        <button type="button" id="assetCancelBtn">Cancel</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="entryModalOverlay" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 id="entryModalTitle">Add Entry</h3>
+    <form id="entryForm">
+      <label>Entry Type
+        <select id="eKind">
+          <option value="snapshot">Balance snapshot (set current balance)</option>
+          <option value="deposit">Deposit</option>
+          <option value="withdrawal">Withdrawal</option>
+          <option value="buy">Buy / Contribution</option>
+          <option value="sell">Sell / Redemption</option>
+          <option value="interest">Interest</option>
+          <option value="dividend">Dividend</option>
+        </select>
+      </label>
+      <label>Date
+        <input type="date" id="eDate" required>
+      </label>
+      <label>Amount (AED)
+        <input type="number" id="eAmount" step="0.01" min="0" required>
+      </label>
+      <label>Note
+        <input id="eNote" autocomplete="off">
+      </label>
+      <div class="modal-actions">
+        <button type="button" id="entryCancelBtn">Cancel</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="assetDetailOverlay" class="modal-overlay hidden">
+  <div class="modal" style="max-width:560px;">
+    <h3 id="assetDetailTitle">Account History</h3>
+    <div id="assetDetailBody"></div>
+    <div class="modal-actions">
+      <button type="button" id="assetDetailCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="importFile" accept=".json" hidden>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
