@@ -40,6 +40,11 @@
     <symbol id="icon-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
     <symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
     <symbol id="icon-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+    <symbol id="icon-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+    <symbol id="icon-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+    <symbol id="icon-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+    <symbol id="icon-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
   </defs>
 </svg>
 
@@ -79,6 +84,7 @@
 
   <nav class="tabs">
     <button class="tab-btn active" data-tab="expenses"><svg class="icon"><use href="#icon-list"></use></svg> Expenses</button>
+    <button class="tab-btn" data-tab="budget"><svg class="icon"><use href="#icon-percent"></use></svg> Budget</button>
     <button class="tab-btn" data-tab="networth"><svg class="icon"><use href="#icon-piechart"></use></svg> Net Worth</button>
   </nav>
 
@@ -97,8 +103,9 @@
       </div>
     </div>
 
-    <div style="margin-bottom:16px;">
+    <div style="margin-bottom:16px; display:flex; gap:8px; flex-wrap:wrap;">
       <button id="addBtn" class="btn-primary"><svg class="icon"><use href="#icon-plus"></use></svg> Add Transaction</button>
+      <button id="scanBtn" class="btn-secondary"><svg class="icon"><use href="#icon-camera"></use></svg> Scan SMS</button>
     </div>
 
     <section class="summary-cards">
@@ -135,15 +142,25 @@
           <svg class="icon search-icon"><use href="#icon-search"></use></svg>
           <input type="text" id="searchBox" placeholder="Search description, notes or category...">
         </div>
-        <select id="filterType"><option value="">All Types</option><option value="income">Income</option><option value="expense">Expense</option></select>
+        <select id="filterType"><option value="">All Types</option><option value="income">Income</option><option value="expense">Expense</option><option value="savings">Savings</option></select>
         <select id="filterCategory"><option value="">All Categories</option></select>
         <select id="filterMethod"><option value="">All Methods</option></select>
         <button id="clearFilters"><svg class="icon"><use href="#icon-x"></use></svg> Clear Filters</button>
         <button id="exportCsv"><svg class="icon"><use href="#icon-download"></use></svg> Export CSV</button>
       </div>
+      <div id="bulkBar" class="bulk-bar hidden">
+        <span id="bulkCount"></span>
+        <select id="bulkBucket"></select>
+        <button id="bulkApplyBucket">Set bucket</button>
+        <select id="bulkCategory"></select>
+        <button id="bulkApplyCategory">Set category</button>
+        <button id="bulkClearOverride">Clear override</button>
+        <button id="bulkCancel"><svg class="icon"><use href="#icon-x"></use></svg></button>
+      </div>
       <table id="txTable">
         <thead>
           <tr>
+            <th class="chk-col"><input type="checkbox" id="checkAll" title="Select page"></th>
             <th data-sort="date">Date</th>
             <th data-sort="type">Type</th>
             <th data-sort="category">Category</th>
@@ -157,6 +174,46 @@
         <tbody id="txTbody"></tbody>
       </table>
       <div class="pagination" id="pagination"></div>
+    </section>
+  </section>
+
+  <section class="tab-panel" id="tab-budget">
+    <div class="budget-toolbar">
+      <div class="budget-month-wrap">
+        <input type="month" id="budgetMonth" min="2026-02">
+        <button id="budgetAllTimeBtn">All time</button>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="openSettingsBtn"><svg class="icon"><use href="#icon-sliders"></use></svg> Budget Settings</button>
+        <button id="openCleanupBtn"><svg class="icon"><use href="#icon-check"></use></svg> Clean Up Data</button>
+      </div>
+    </div>
+
+    <section class="summary-cards budget-tiles" id="budgetTiles"></section>
+
+    <section class="charts-grid">
+      <div class="panel">
+        <h3>Income Consumption</h3>
+        <div id="budgetDonutWrap"></div>
+        <div id="budgetDonutLegend" class="legend"></div>
+      </div>
+      <div class="panel">
+        <h3>Savings &amp; Investment</h3>
+        <div id="savingsPanel"></div>
+      </div>
+      <div class="panel wide">
+        <h3>Bucket Budgets</h3>
+        <div id="bucketBars"></div>
+      </div>
+      <div class="panel wide">
+        <h3>Monthly Trend by Bucket</h3>
+        <div id="budgetTrendWrap" style="overflow-x:auto;"></div>
+        <div id="budgetTrendLegend" class="chart-legend-inline" style="flex-wrap:wrap; margin-top:8px;"></div>
+      </div>
+      <div class="panel wide">
+        <h3><svg class="icon"><use href="#icon-alert"></use></svg> Leak Alerts</h3>
+        <div id="leakAlerts"></div>
+      </div>
     </section>
   </section>
 
@@ -185,9 +242,13 @@
     </section>
 
     <section class="table-section">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
         <h3 style="margin:0;">Accounts & Investments</h3>
-        <button id="addAssetBtn" class="btn-primary"><svg class="icon"><use href="#icon-plus"></use></svg> Add Account/Investment</button>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <span id="priceStatus" class="price-status"></span>
+          <button id="refreshPricesBtn" class="btn-secondary"><svg class="icon"><use href="#icon-refresh"></use></svg> Refresh prices</button>
+          <button id="addAssetBtn" class="btn-primary"><svg class="icon"><use href="#icon-plus"></use></svg> Add Account/Investment</button>
+        </div>
       </div>
       <div class="asset-grid" id="assetGrid"></div>
     </section>
@@ -200,20 +261,19 @@
     <h3 id="modalTitle">Add Transaction</h3>
     <form id="txForm">
       <label>Type
-        <select id="fType"><option value="expense">Expense</option><option value="income">Income</option></select>
+        <select id="fType"><option value="expense">Expense</option><option value="income">Income</option><option value="savings">Savings &amp; Investment</option></select>
       </label>
       <label>Date
         <input type="date" id="fDate" required>
       </label>
       <label>Category
-        <input list="categoryList" id="fCategory" required autocomplete="off">
+        <select id="fCategory" required></select>
       </label>
-      <datalist id="categoryList"></datalist>
       <label>Description
         <input id="fDescription" autocomplete="off">
       </label>
-      <label>Amount (AED)
-        <input type="number" id="fAmount" step="0.01" min="0" required>
+      <label>Amount (AED) <span class="hint">— negative = refund</span>
+        <input type="number" id="fAmount" step="0.01" required>
       </label>
       <label>Payment Method
         <input list="methodList" id="fMethod" autocomplete="off">
@@ -221,6 +281,9 @@
       <datalist id="methodList"></datalist>
       <label>Notes
         <input id="fNotes" autocomplete="off">
+      </label>
+      <label id="fBucketWrap">Budget bucket
+        <select id="fBucket"></select>
       </label>
       <div class="modal-actions">
         <button type="button" id="cancelBtn">Cancel</button>
@@ -248,6 +311,35 @@
       <label>Institution
         <input id="aInstitution" placeholder="e.g. RAK Bank" autocomplete="off">
       </label>
+      <fieldset class="holding-fields">
+        <legend>Holding details (optional — for live-priced shares/ETFs)</legend>
+        <label>Ticker (Yahoo symbol, e.g. VWRA.L, AAPL)
+          <input id="aTicker" autocomplete="off" placeholder="leave blank for cash accounts">
+        </label>
+        <label>Exchange
+          <input id="aExchange" autocomplete="off" list="exchangeList" placeholder="e.g. LSE, NASDAQ, NSE">
+        </label>
+        <datalist id="exchangeList">
+          <option value="NASDAQ"><option value="NYSE"><option value="LSE"><option value="NSE">
+          <option value="BSE"><option value="DFM"><option value="ADX"><option value="Euronext">
+        </datalist>
+        <div class="field-row">
+          <label>Shares
+            <input type="number" id="aShares" step="any" min="0">
+          </label>
+          <label>Buy price/share (AED)
+            <input type="number" id="aBuyPrice" step="any" min="0">
+          </label>
+        </div>
+        <div class="field-row">
+          <label>Purchase date
+            <input type="date" id="aBuyDate">
+          </label>
+          <label>Manual price (AED) <span class="hint">overrides live — clear to use live</span>
+            <input type="number" id="aManualPrice" step="any" min="0">
+          </label>
+        </div>
+      </fieldset>
       <div class="modal-actions">
         <button type="button" id="assetCancelBtn">Cancel</button>
         <button type="submit" class="btn-primary">Save</button>
@@ -294,6 +386,53 @@
     <div id="assetDetailBody"></div>
     <div class="modal-actions">
       <button type="button" id="assetDetailCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="settingsOverlay" class="modal-overlay hidden">
+  <div class="modal" style="max-width:620px;">
+    <h3>Budget Settings</h3>
+    <div id="settingsBody"></div>
+    <div class="modal-actions">
+      <button type="button" id="settingsResetBtn">Reset to defaults</button>
+      <button type="button" id="settingsCancelBtn">Cancel</button>
+      <button type="button" id="settingsSaveBtn" class="btn-primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="cleanupOverlay" class="modal-overlay hidden">
+  <div class="modal" style="max-width:620px;">
+    <h3>Data Clean-Up</h3>
+    <div id="cleanupBody"></div>
+    <div class="modal-actions">
+      <button type="button" id="cleanupCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="scanOverlay" class="modal-overlay hidden">
+  <div class="modal" style="max-width:620px;">
+    <h3>Scan Bank SMS</h3>
+    <div class="scan-modes">
+      <button type="button" id="scanModeImage" class="active"><svg class="icon"><use href="#icon-camera"></use></svg> Screenshot</button>
+      <button type="button" id="scanModeText"><svg class="icon"><use href="#icon-edit"></use></svg> Paste text</button>
+    </div>
+    <div id="scanImagePane">
+      <p class="hint-block">Upload screenshots of bank SMS/notifications. One image can hold several messages — each is extracted separately, and anything already recorded is skipped.</p>
+      <input type="file" id="scanFiles" accept="image/*" multiple>
+      <div id="scanProgress" class="hint-block"></div>
+    </div>
+    <div id="scanTextPane" class="hidden">
+      <p class="hint-block">Paste the SMS text (one or more messages).</p>
+      <textarea id="scanText" rows="6" placeholder="Your Credit Card ending 1234 was used for AED 156.75 at CARREFOUR on 15/06/2026 14:32..."></textarea>
+      <button type="button" id="scanParseBtn" class="btn-secondary" style="margin-top:8px;">Parse</button>
+    </div>
+    <div id="scanResults"></div>
+    <div class="modal-actions">
+      <button type="button" id="scanCancelBtn">Close</button>
+      <button type="button" id="scanInsertBtn" class="btn-primary hidden">Add selected</button>
     </div>
   </div>
 </div>

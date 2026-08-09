@@ -28,6 +28,7 @@ function buildLocalAdapter() {
   const transactions = makeLocalStore('expenseDashboard_v1', SEED_TRANSACTIONS);
   const assets = makeLocalStore('expenseDashboard_assets_v1', []);
   const assetEntries = makeLocalStore('expenseDashboard_assetEntries_v1', []);
+  const settings = makeLocalStore('expenseDashboard_settings_v1', []);
   const authSubscribers = [];
   const fakeUser = {uid: 'local-user', email: 'local'};
   return {
@@ -40,7 +41,8 @@ function buildLocalAdapter() {
     },
     transactions,
     assets,
-    assetEntries
+    assetEntries,
+    settings
   };
 }
 
@@ -105,6 +107,7 @@ async function buildCloudAdapter() {
   const transactions = makeCloudStore('transactions', SEED_TRANSACTIONS);
   const assets = makeCloudStore('assets', []);
   const assetEntries = makeCloudStore('assetEntries', []);
+  const settings = makeCloudStore('settings', []);
 
   return {
     mode: 'cloud',
@@ -118,7 +121,8 @@ async function buildCloudAdapter() {
     },
     transactions,
     assets,
-    assetEntries
+    assetEntries,
+    settings
   };
 }
 

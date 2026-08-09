@@ -1,4 +1,4 @@
-const CACHE_NAME = 'expense-dashboard-v5';
+const CACHE_NAME = 'expense-dashboard-v6';
 const SHELL_FILES = [
   './index.html',
   './styles.css',
@@ -6,6 +6,9 @@ const SHELL_FILES = [
   './data-adapter.js',
   './firebase-config.js',
   './seed-data.js',
+  './budget.js',
+  './scan.js',
+  './prices.js',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png'
