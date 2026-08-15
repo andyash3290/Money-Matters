@@ -1,4 +1,4 @@
-const CACHE_NAME = 'expense-dashboard-v7';
+const CACHE_NAME = 'expense-dashboard-v8';
 const SHELL_FILES = [
   './index.html',
   './styles.css',
