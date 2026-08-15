@@ -1,6 +1,7 @@
 import { createDataAdapter } from './data-adapter.js';
-import { DEFAULT_BUDGET_CONFIG, mergeBudgetConfig, effectiveBucket, bucketOf, ymOf, currentYm,
-         monthRange, computeMonth, sinkingBalance, subCapSpend, computeAlerts } from './budget.js';
+import { DEFAULT_BUDGET_CONFIG, mergeBudgetConfig, effectiveBucket, effectivePerson, bucketOf,
+         ymOf, currentYm, prevYm, monthRange, computeMonth, sinkingBalance, bucketCarry,
+         subCapSpend, computeAlerts, detectRecurring, computeProjection, computeCards } from './budget.js';
 import { ocrImage, parseSmsText, fingerprintOf } from './scan.js';
 import { fetchPriceAED } from './prices.js';
 
@@ -38,7 +39,7 @@ let editingId = null;
 let editingAssetId = null;
 let activeAssetId = null;
 let dateRange = {start:null, end:null};
-let tableFilters = {search:'', type:'', category:'', method:''};
+let tableFilters = {search:'', type:'', category:'', method:'', person:''};
 let sortState = {col:'date', dir:'desc'};
 let currentPage = 1;
 const PAGE_SIZE = 20;
@@ -50,6 +51,12 @@ let cardMap = [];
 let vendorRules = [];
 let customCategories = [];
 let budgetMonth = currentYm();
+let cardsMonth = currentYm();
+let budgetMonthPicked = false;
+let cardsMonthPicked = false;
+let excludeOneOff = false;
+let cardsCfg = [];
+let endedRecurring = [];
 const selectedIds = new Set();
 let scanCandidates = [];
 let lastPriceFetchAt = 0;
@@ -65,7 +72,31 @@ function applySettingsDocs(items){
   cardMap = settingsGet('cardMap') || [];
   vendorRules = settingsGet('vendorRules') || [];
   customCategories = settingsGet('categoryList') || [];
+  cardsCfg = settingsGet('cards') || [];
+  endedRecurring = settingsGet('endedRecurring') || [];
 }
+
+// Payment methods that look like credit cards, used to seed the Cards tab the
+// first time so the user isn't staring at an empty screen.
+function creditCardMethods(){
+  return [...new Set(transactions.map(t => t.method).filter(Boolean))]
+    .filter(m => /\bcc\b|credit|card/i.test(m)).sort();
+}
+function effectiveCards(){
+  if (cardsCfg.length) return cardsCfg;
+  return creditCardMethods().map(m => ({ method: m, dueDay: 20, creditLimit: null, openingBalance: 0, trackFrom: currentYm() }));
+}
+// If the calendar month has no data yet (e.g. you open the app before logging
+// anything this month), fall back to the most recent month that does — an empty
+// dashboard is worse than a slightly stale one.
+function defaultViewMonth(){
+  const cur = currentYm();
+  if (transactions.some(t => ymOf(t) === cur)) return cur;
+  const latest = transactions.map(t => ymOf(t)).filter(Boolean).sort().pop();
+  return latest || cur;
+}
+function personLabel(id){ return ((budgetConfig.people || []).find(p => p.id === id) || {}).label || id; }
+function personColor(id){ return ((budgetConfig.people || []).find(p => p.id === id) || {}).color || '#94a3b8'; }
 
 function allExpenseCategories(){
   return [...new Set([
@@ -154,6 +185,7 @@ function tableTransactions(){
   if (f.type) list = list.filter(t => t.type === f.type);
   if (f.category) list = list.filter(t => t.category === f.category);
   if (f.method) list = list.filter(t => t.method === f.method);
+  if (f.person) list = list.filter(t => effectivePerson(t, budgetConfig) === f.person);
   list = list.slice().sort((a,b) => {
     let av = a[sortState.col], bv = b[sortState.col];
     if (sortState.col === 'amount') { av = Number(av); bv = Number(bv); }
@@ -319,12 +351,16 @@ function renderTable(){
   const pageItems = list.slice(startIdx, startIdx + PAGE_SIZE);
   document.getElementById('txTbody').innerHTML = pageItems.map(t => {
     const ovr = t.bucketOverride ? `<span class="ovr-badge" title="Bucket override: ${escapeAttr((bucketOf(budgetConfig, t.bucketOverride)||{}).label || t.bucketOverride)}">${icon('sliders')}</span>` : '';
+    const one = t.oneOff ? `<span class="ovr-badge one" title="One-off — excluded from run-rate">${icon('star')}</span>` : '';
+    const pid = effectivePerson(t, budgetConfig);
+    const pdot = (t.type === 'expense' && pid !== 'joint')
+      ? `<span class="person-chip" style="background:${personColor(pid)}22; color:${personColor(pid)}">${escapeHtml(personLabel(pid))}</span>` : '';
     return `
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-check" data-id="${t.id}" ${selectedIds.has(t.id)?'checked':''}></td>
       <td>${t.date}</td>
-      <td><span class="badge ${t.type}">${t.type}</span></td>
-      <td><span class="dot" style="background:${colorFor(t.category)}"></span> ${escapeHtml(t.category)}${ovr}</td>
+      <td><span class="badge ${t.type}">${t.type === 'cardpayment' ? 'payment' : t.type}</span></td>
+      <td><span class="dot" style="background:${colorFor(t.category)}"></span> ${escapeHtml(t.category)}${ovr}${one}${pdot}</td>
       <td>${escapeHtml(t.description)}</td>
       <td class="amount ${t.type}">${fmtMoney(t.amount)}</td>
       <td>${escapeHtml(t.method)}</td>
@@ -365,6 +401,7 @@ function updateBulkBar(){
   const spendables = budgetConfig.buckets.filter(b => !['unmapped'].includes(b.id));
   document.getElementById('bulkBucket').innerHTML = spendables.map(b => `<option value="${b.id}">${escapeHtml(b.label)}</option>`).join('');
   document.getElementById('bulkCategory').innerHTML = allExpenseCategories().map(c => `<option value="${escapeAttr(c)}">${escapeHtml(c)}</option>`).join('');
+  document.getElementById('bulkPerson').innerHTML = (budgetConfig.people||[]).map(p => `<option value="${p.id}">${escapeHtml(p.label)}</option>`).join('');
 }
 
 function updateSortIndicators(){
@@ -380,8 +417,24 @@ function refreshOptionLists(){
   document.getElementById('filterCategory').innerHTML = '<option value="">All Categories</option>' + cats.map(c => `<option value="${escapeAttr(c)}">${escapeHtml(c)}</option>`).join('');
   document.getElementById('filterMethod').innerHTML = '<option value="">All Methods</option>' + methods.map(m => `<option value="${escapeAttr(m)}">${escapeHtml(m)}</option>`).join('');
   document.getElementById('methodList').innerHTML = methods.map(m => `<option value="${escapeAttr(m)}">`).join('');
+  document.getElementById('filterPerson').innerHTML = '<option value="">All People</option>' + (budgetConfig.people||[]).map(p => `<option value="${p.id}">${escapeHtml(p.label)}</option>`).join('');
   document.getElementById('filterCategory').value = tableFilters.category;
   document.getElementById('filterMethod').value = tableFilters.method;
+  document.getElementById('filterPerson').value = tableFilters.person;
+}
+
+// Card payments and income aren't attributable spend, so the person/bucket/
+// one-off controls hide for them.
+function syncFormMode(tx){
+  const type = document.getElementById('fType').value;
+  const isCardPay = type === 'cardpayment';
+  const isIncome = type === 'income';
+  document.getElementById('fPersonWrap').style.display = (isCardPay || isIncome) ? 'none' : '';
+  document.getElementById('fBucketWrap').style.display = (isCardPay || isIncome) ? 'none' : '';
+  document.getElementById('fOneOffWrap').style.display = isCardPay ? 'none' : '';
+  document.getElementById('fPerson').innerHTML = (budgetConfig.people||[]).map(p => `<option value="${p.id}">${escapeHtml(p.label)}</option>`).join('');
+  const auto = tx ? effectivePerson(tx, budgetConfig) : 'joint';
+  document.getElementById('fPerson').value = (tx && tx.person) ? tx.person : auto;
 }
 
 // Category dropdown is a fixed list per type; "+ Add new category" keeps it
@@ -391,6 +444,7 @@ function populateCategorySelect(type, selectedValue){
   let options;
   if (type === 'income') options = ['Income'];
   else if (type === 'savings') options = sleeveCategories();
+  else if (type === 'cardpayment') options = ['Card Payment'];
   else options = allExpenseCategories();
   if (selectedValue && !options.includes(selectedValue)) options = [selectedValue, ...options];
   sel.innerHTML = options.map(c => `<option value="${escapeAttr(c)}">${escapeHtml(c)}</option>`).join('') +
@@ -426,6 +480,7 @@ function render(){
   renderMethodBars();
   renderTable();
   renderBudget();
+  renderCards();
 }
 
 function openAddModal(){
@@ -434,8 +489,10 @@ function openAddModal(){
   document.getElementById('txForm').reset();
   document.getElementById('fDate').value = isoDate(new Date());
   document.getElementById('fType').value = 'expense';
+  document.getElementById('fOneOff').checked = false;
   populateCategorySelect('expense');
   populateBucketSelect(null);
+  syncFormMode(null);
   document.getElementById('modalOverlay').classList.remove('hidden');
   document.getElementById('fCategory').focus();
 }
@@ -451,7 +508,9 @@ function openEditModal(id){
   document.getElementById('fAmount').value = t.amount;
   document.getElementById('fMethod').value = t.method || '';
   document.getElementById('fNotes').value = t.notes || '';
+  document.getElementById('fOneOff').checked = !!t.oneOff;
   populateBucketSelect(t);
+  syncFormMode(t);
   document.getElementById('modalOverlay').classList.remove('hidden');
 }
 function closeModal(){ document.getElementById('modalOverlay').classList.add('hidden'); editingId = null; }
@@ -717,19 +776,25 @@ function openAssetDetail(assetId){
 
 // ---------- Budget tab ----------
 
-function fmtMoney0(n){ return 'AED ' + (Number(n)||0).toLocaleString('en-US', {maximumFractionDigits:0}); }
+function fmtMoney0(n){
+  let v = Number(n) || 0;
+  if (Math.abs(v) < 0.5) v = 0; // kill floating-point "-0" from balanced payments
+  return 'AED ' + v.toLocaleString('en-US', {maximumFractionDigits:0});
+}
 
 function aggregateMonths(months){
-  const results = months.map(m => computeMonth(transactions, budgetConfig, m));
-  const agg = { income:0, spent:0, logged:0, byBucket:{}, bySleeve:{} };
+  const results = months.map(m => computeMonth(transactions, budgetConfig, m, { excludeOneOff }));
+  const agg = { income:0, spent:0, logged:0, oneOffIncome:0, oneOffSpend:0, byBucket:{}, bySleeve:{}, byPerson:{} };
   for (const r of results) {
     agg.income += r.income; agg.spent += r.spent; agg.logged += r.logged;
+    agg.oneOffIncome += r.oneOffIncome; agg.oneOffSpend += r.oneOffSpend;
     for (const [b, rec] of Object.entries(r.byBucket)) {
       const t = agg.byBucket[b] || (agg.byBucket[b] = { spent:0, byCategory:{} });
       t.spent += rec.spent;
       for (const [c, v] of Object.entries(rec.byCategory)) t.byCategory[c] = (t.byCategory[c]||0) + v;
     }
     for (const [k, v] of Object.entries(r.bySleeve)) agg.bySleeve[k] = (agg.bySleeve[k]||0) + v;
+    for (const [k, v] of Object.entries(r.byPerson)) agg.byPerson[k] = (agg.byPerson[k]||0) + v;
   }
   agg.residual = agg.income - agg.spent;
   agg.savingsDisplay = agg.logged > 0 ? agg.logged : agg.residual;
@@ -753,6 +818,16 @@ function paceLabel(fillFrac, paceFrac){
 
 function renderBudget(){
   if (!document.getElementById('budgetTiles') || !adapter) return;
+  // Transactions arrive after the listeners are wired, so settle on a sensible
+  // month once data exists — unless the user has already chosen one.
+  if (!budgetMonthPicked && budgetMonth !== 'all') {
+    const want = defaultViewMonth();
+    if (want !== budgetMonth) {
+      budgetMonth = want;
+      const mi = document.getElementById('budgetMonth');
+      if (mi) mi.value = want;
+    }
+  }
   const cfg = budgetConfig;
   const now = new Date();
   const nowYm = currentYm(now);
@@ -766,16 +841,23 @@ function renderBudget(){
   const baseline = cfg.monthlyIncome * n;
   const savTarget = bucketOf(cfg, 'savings_investment').budget * n;
   const sinkBal = sinkingBalance(transactions, cfg, allTime ? nowYm : budgetMonth);
-  const projected = isCur ? agg.spent / Math.max(day,1) * daysIn : agg.spent;
+  const proj = allTime ? null : computeProjection(transactions, cfg, budgetMonth, now, endedRecurring);
 
   document.getElementById('budgetAllTimeBtn').classList.toggle('active', allTime);
 
-  // Tiles
+  // Tiles. The projection tile explains itself — committed vs run-rate — because
+  // "projected 31,000" is only trustworthy if you can see where it came from.
   const savPct = savTarget > 0 ? (agg.savingsDisplay / savTarget * 100) : 0;
+  let projTile;
+  if (isCur && proj) {
+    projTile = `${fmtMoney0(proj.projected)}<div class="tile-note">${fmtMoney0(proj.committedRemaining)} still committed · ${fmtMoney0(proj.discretionaryRunRate)} run-rate</div>`;
+  } else projTile = '—';
+  const oneOffNote = (agg.oneOffSpend || agg.oneOffIncome) && !excludeOneOff
+    ? `<div class="tile-note">incl. ${fmtMoney0(agg.oneOffSpend)} one-off spend</div>` : '';
   document.getElementById('budgetTiles').innerHTML = `
-    <div class="card"><div class="card-icon income">${icon('trending-up')}</div><div class="card-label">Income ${isCur?'MTD':''}</div><div class="card-value">${fmtMoney0(agg.income)}</div></div>
-    <div class="card"><div class="card-icon expense">${icon('trending-down')}</div><div class="card-label">Spent ${isCur?'MTD':''}</div><div class="card-value">${fmtMoney0(agg.spent)}</div></div>
-    <div class="card"><div class="card-icon rate">${icon('clock')}</div><div class="card-label">Projected month-end</div><div class="card-value">${isCur ? fmtMoney0(projected) : '—'}</div></div>
+    <div class="card"><div class="card-icon income">${icon('trending-up')}</div><div class="card-label">Income ${isCur?'MTD':''}</div><div class="card-value">${fmtMoney0(agg.income)}</div>${agg.oneOffIncome && !excludeOneOff ? `<div class="tile-note">incl. ${fmtMoney0(agg.oneOffIncome)} one-off</div>` : ''}</div>
+    <div class="card"><div class="card-icon expense">${icon('trending-down')}</div><div class="card-label">Spent ${isCur?'MTD':''}</div><div class="card-value">${fmtMoney0(agg.spent)}</div>${oneOffNote}</div>
+    <div class="card"><div class="card-icon rate">${icon('clock')}</div><div class="card-label">Projected month-end</div><div class="card-value">${projTile}</div></div>
     <div class="card"><div class="card-icon savings">${icon('wallet')}</div><div class="card-label">Savings vs ${fmtMoney0(savTarget)}</div><div class="card-value ${agg.savingsDisplay>=0?'positive':'negative'}">${fmtMoney0(agg.savingsDisplay)} <span class="tile-sub">(${savPct.toFixed(0)}%)</span></div></div>
     <div class="card"><div class="card-icon networth">${icon('landmark')}</div><div class="card-label">Sinking Fund balance</div><div class="card-value ${sinkBal>=0?'positive':'negative'}">${fmtMoney0(sinkBal)}</div></div>`;
 
@@ -819,7 +901,8 @@ function renderBudget(){
     const isSavings = b.id === 'savings_investment';
     const isSinking = !!b.rolling;
     const value = isSavings ? agg.savingsDisplay : spent;
-    const budget = b.budget * n;
+    const carry = (b.rollover && !allTime) ? bucketCarry(transactions, cfg, b.id, budgetMonth) : 0;
+    const budget = b.budget * n + carry;
     const fillFrac = budget > 0 ? Math.max(0, value / budget) : (value > 0 ? 1 : 0);
     let cls;
     if (isSavings) cls = fillFrac >= paceFrac * 0.999 ? 'green' : (fillFrac >= paceFrac * 0.6 ? 'amber' : 'red');
@@ -835,6 +918,7 @@ function renderBudget(){
     }
     const warnHtml = b.id === 'unmapped' ? `<span class="pace-chip pace-bad">${icon('alert')} unmapped</span>` : '';
     const balHtml = isSinking ? `<span class="pace-chip ${sinkBal>=0?'pace-good':'pace-bad'}">balance ${fmtMoney0(sinkBal)}</span>` : '';
+    const carryHtml = carry ? `<span class="pace-chip ${carry>=0?'pace-good':'pace-bad'}" title="Carried from previous months">${carry>=0?'+':''}${fmtMoney0(carry)} carried</span>` : '';
 
     // Detail: category breakdown + sub-caps
     const byCat = Object.entries((agg.byBucket[b.id]||{}).byCategory || {}).sort((a,c) => c[1]-a[1]);
@@ -864,7 +948,7 @@ function renderBudget(){
       <button type="button" class="bucket-head">
         <span class="dot" style="background:${b.color}"></span>
         <span class="bucket-name">${escapeHtml(b.label)}${b.legacy ? ' <span class="hint">(legacy)</span>' : ''}</span>
-        ${paceHtml}${balHtml}${warnHtml}
+        ${paceHtml}${balHtml}${carryHtml}${warnHtml}
         <span class="bucket-nums">${fmtMoney0(value)} / ${budget>0?fmtMoney0(budget):'0'} <span class="hint">(${pctTxt})</span></span>
         ${icon('chevron','chev')}
       </button>
@@ -881,6 +965,8 @@ function renderBudget(){
     h.parentElement.classList.toggle('open');
   });
 
+  renderPersonPanel(agg);
+  renderRecurringPanel(allTime ? nowYm : budgetMonth);
   renderBudgetTrend();
 
   // Leak alerts (month view only — pick a month for actionable alerts)
@@ -888,11 +974,232 @@ function renderBudget(){
   if (allTime) {
     alertsEl.innerHTML = '<div class="empty">Pick a specific month to see its leak alerts.</div>';
   } else {
-    const alerts = computeAlerts(transactions, cfg, budgetMonth, now);
+    const alerts = computeAlerts(transactions, cfg, budgetMonth, now, endedRecurring);
     alertsEl.innerHTML = alerts.map(a => `
-      <div class="alert-row ${a.sev}">${icon(a.sev==='info'?'search':'alert')}<span>${escapeHtml(a.text)}</span></div>
+      <div class="alert-row ${a.sev}">${icon(a.sev==='info'?'search':'alert')}<span>${escapeHtml(a.text)}</span>
+      ${a.txId ? `<button class="icon-btn mark-oneoff-btn" data-id="${a.txId}" title="Mark as one-off">${icon('star')}</button>` : ''}</div>
     `).join('') || `<div class="alert-row ok">${icon('check')}<span>No leaks detected — all buckets look healthy.</span></div>`;
+    alertsEl.querySelectorAll('.mark-oneoff-btn').forEach(b => b.onclick = () => {
+      adapter.transactions.update(b.dataset.id, { oneOff: true });
+    });
   }
+}
+
+function renderPersonPanel(agg){
+  const cfg = budgetConfig;
+  const entries = (cfg.people||[])
+    .map(p => ({ ...p, value: agg.byPerson[p.id] || 0 }))
+    .filter(p => p.value !== 0)
+    .sort((a,b) => b.value - a.value);
+  const total = entries.reduce((s,e) => s+e.value, 0);
+  const el = document.getElementById('personPanel');
+  if (!entries.length) { el.innerHTML = '<div class="empty">No attributable spend in this period.</div>'; return; }
+  el.innerHTML = entries.map(p => {
+    const pct = total > 0 ? (p.value/total*100) : 0;
+    return `<div class="method-row person-row" data-person="${p.id}">
+      <div class="method-label">${escapeHtml(p.label)}</div>
+      <div class="method-bar-track"><div class="method-bar-fill" style="width:${pct.toFixed(1)}%; background:${p.color}"></div></div>
+      <div class="method-value">${fmtMoney0(p.value)} <span class="hint">${pct.toFixed(0)}%</span></div>
+    </div>`;
+  }).join('') + `<div class="hint-block">Derived from category and description names; set explicitly on any transaction to override.</div>`;
+  el.querySelectorAll('.person-row').forEach(r => r.onclick = () => {
+    tableFilters.person = r.dataset.person;
+    document.getElementById('filterPerson').value = r.dataset.person;
+    document.querySelector('[data-tab="expenses"]').click();
+    currentPage = 1; renderTable();
+    document.querySelector('.table-section').scrollIntoView({behavior:'smooth'});
+  });
+}
+
+function renderRecurringPanel(ym){
+  const cfg = budgetConfig;
+  const all = detectRecurring(transactions, cfg, ym, endedRecurring);
+  const list = all.filter(r => r.active).slice(0, 14);
+  const endedCount = all.filter(r => r.ended).length;
+  const threshold = (cfg.recurring && cfg.recurring.changeThresholdPct) || 15;
+  const el = document.getElementById('recurringPanel');
+  const endedFooter = endedCount
+    ? `<div class="hint-block">${endedCount} charge${endedCount>1?'s':''} marked as ended and excluded. <button type="button" class="icon-btn" id="restoreRecurring">Restore all</button></div>` : '';
+  if (!list.length) { el.innerHTML = '<div class="empty">Not enough history yet to detect recurring charges.</div>' + endedFooter; wireRecurringActions(ym); return; }
+  const monthlyTotal = list.reduce((s,r) => s + r.typical, 0);
+  el.innerHTML = `<div class="hint-block">Detected ${list.length} recurring charges — about <strong>${fmtMoney0(monthlyTotal)}</strong>/month committed.</div>` +
+    list.map(r => {
+      const changed = r.previous && Math.abs(r.changePct) >= threshold;
+      const up = r.changePct > 0;
+      const sparks = r.months.slice(-6);
+      const maxV = Math.max(...sparks.map(s => Math.abs(s.amount)), 1);
+      const spark = sparks.map(s => `<span class="spark-bar" style="height:${Math.max(8, Math.abs(s.amount)/maxV*100).toFixed(0)}%" title="${s.ym}: ${fmtMoney0(s.amount)}"></span>`).join('');
+      return `<div class="recurring-row ${changed ? (up ? 'up' : 'down') : ''}">
+        <div class="rec-main">
+          <div class="rec-label">${escapeHtml(r.label)}</div>
+          <div class="rec-cat hint">${escapeHtml(r.category)}${r.postedThisMonth == null ? ' · not yet this month' : ''}</div>
+        </div>
+        <div class="spark">${spark}</div>
+        <div class="rec-amt">${fmtMoney0(r.typical)}
+          ${changed ? `<div class="rec-change ${up?'up':'down'}">${up?'▲':'▼'} ${Math.abs(r.changePct).toFixed(0)}%</div>` : ''}
+        </div>
+        <button type="button" class="icon-btn end-rec-btn" data-key="${escapeAttr(r.key)}" title="Mark as ended — stops counting it as a future commitment">${icon('x')}</button>
+      </div>`;
+    }).join('') + endedFooter;
+  wireRecurringActions(ym);
+}
+
+function wireRecurringActions(ym){
+  const el = document.getElementById('recurringPanel');
+  el.querySelectorAll('.end-rec-btn').forEach(b => b.onclick = () => {
+    const key = b.dataset.key;
+    if (!endedRecurring.includes(key)) settingsSet('endedRecurring', [...endedRecurring, key]);
+  });
+  const restore = el.querySelector('#restoreRecurring');
+  if (restore) restore.onclick = () => settingsSet('endedRecurring', []);
+}
+
+// ---------- Cards tab ----------
+
+function renderCards(){
+  if (!document.getElementById('cardGrid') || !adapter) return;
+  if (!cardsMonthPicked) {
+    const want = defaultViewMonth();
+    if (want !== cardsMonth) {
+      cardsMonth = want;
+      const ci = document.getElementById('cardsMonth');
+      if (ci) ci.value = want;
+    }
+  }
+  const cards = effectiveCards();
+  const now = new Date();
+  const rows = computeCards(transactions, cards, cardsMonth, now);
+  const gridEl = document.getElementById('cardGrid');
+  const tilesEl = document.getElementById('cardTiles');
+
+  if (!rows.length) {
+    tilesEl.innerHTML = '';
+    gridEl.innerHTML = `<div class="empty">No credit cards configured yet. Use <strong>Card Settings</strong> to add one — payment methods containing "CC" or "card" are offered automatically.</div>`;
+    document.getElementById('cardPaymentList').innerHTML = '';
+    return;
+  }
+
+  const totalOutstanding = rows.reduce((s,r) => s + r.outstanding, 0);
+  const totalStatement = rows.reduce((s,r) => s + r.statementAmount, 0);
+  const totalPaid = rows.reduce((s,r) => s + r.paidThisMonth, 0);
+  const totalCycle = rows.reduce((s,r) => s + r.cycleSpend, 0);
+  const unpaid = rows.filter(r => r.status === 'unpaid' || r.status === 'partial');
+  tilesEl.innerHTML = `
+    <div class="card"><div class="card-icon expense">${icon('card')}</div><div class="card-label">Outstanding</div><div class="card-value ${totalOutstanding>0?'negative':'positive'}">${fmtMoney0(totalOutstanding)}</div></div>
+    <div class="card"><div class="card-icon rate">${icon('clock')}</div><div class="card-label">Due this month</div><div class="card-value">${fmtMoney0(totalStatement)}</div>${unpaid.length?`<div class="tile-note">${unpaid.length} card${unpaid.length>1?'s':''} not settled</div>`:''}</div>
+    <div class="card"><div class="card-icon income">${icon('check')}</div><div class="card-label">Paid this month</div><div class="card-value positive">${fmtMoney0(totalPaid)}</div></div>
+    <div class="card"><div class="card-icon savings">${icon('trending-down')}</div><div class="card-label">Spent this cycle</div><div class="card-value">${fmtMoney0(totalCycle)}</div></div>`;
+
+  gridEl.innerHTML = rows.map(r => {
+    const statusMap = { paid:['pace-good','Paid in full'], partial:['pace-bad','Partially paid'], unpaid:['pace-bad','Not paid'], none:['pace-ok','No statement'] };
+    const [cls, label] = statusMap[r.status];
+    // A live countdown only makes sense for the current month; browsing history
+    // should show the cycle, not tell you a closed statement is "56 days overdue".
+    let dueTxt;
+    if (r.status === 'paid') dueTxt = 'Settled';
+    else if (!r.isCurrentMonth) dueTxt = `${fmtMonth(cardsMonth)} cycle`;
+    else if (r.statementAmount <= 0) dueTxt = 'Nothing due';
+    else if (r.daysToDue < 0) dueTxt = `${Math.abs(r.daysToDue)} days overdue`;
+    else if (r.daysToDue === 0) dueTxt = 'Due today';
+    else dueTxt = `Due in ${r.daysToDue} days`;
+    const util0 = r.utilisation != null ? Math.max(0, r.utilisation) : null;
+    const util = util0 != null
+      ? `<div class="method-bar-track" style="margin-top:8px;"><div class="bucket-fill ${util0>70?'red':(util0>40?'amber':'green')}" style="width:${Math.min(100,util0).toFixed(1)}%"></div></div>
+         <div class="hint" style="margin-top:4px;">${util0.toFixed(0)}% of ${fmtMoney0(r.limit)} limit</div>` : '';
+    return `<div class="asset-card card-card">
+      <div class="asset-card-head">
+        <div><div class="asset-name">${escapeHtml(r.method)}</div>
+        <div class="asset-meta">${escapeHtml(dueTxt)} · due day ${r.dueDay}</div></div>
+        <span class="pace-chip ${cls}">${label}</span>
+      </div>
+      <div class="asset-balance ${r.outstanding>0?'negative':''}">${fmtMoney0(r.outstanding)}</div>
+      <div class="hint">outstanding balance</div>
+      <div class="card-lines">
+        <div><span class="hint">Last statement</span><strong>${fmtMoney0(r.statementAmount)}</strong></div>
+        <div><span class="hint">Paid this month</span><strong>${fmtMoney0(r.paidThisMonth)}</strong></div>
+        <div><span class="hint">Spent this cycle</span><strong>${fmtMoney0(r.cycleSpend)}</strong></div>
+      </div>
+      ${util}
+      <div class="asset-actions">
+        <button class="icon-btn pay-card-btn" data-method="${escapeAttr(r.method)}" data-amount="${(r.statementAmount > 0 ? Math.max(0, r.statementAmount - r.paidThisMonth) : Math.max(0, r.outstanding)).toFixed(2)}">${icon('plus')} Log payment</button>
+      </div>
+    </div>`;
+  }).join('');
+  gridEl.querySelectorAll('.pay-card-btn').forEach(b => b.onclick = () => openPaymentModal(b.dataset.method, b.dataset.amount));
+
+  const payments = transactions.filter(t => t.type === 'cardpayment').sort((a,b) => a.date < b.date ? 1 : -1).slice(0, 12);
+  document.getElementById('cardPaymentList').innerHTML = payments.length
+    ? `<table><thead><tr><th>Date</th><th>Card</th><th>Amount</th><th>Note</th><th></th></tr></thead><tbody>` +
+      payments.map(p => `<tr><td>${p.date}</td><td>${escapeHtml(p.method)}</td><td class="amount">${fmtMoney(p.amount)}</td><td>${escapeHtml(p.notes||'')}</td>
+      <td><button class="icon-btn delete-btn" data-id="${p.id}" title="Delete">${icon('trash')}</button></td></tr>`).join('') + '</tbody></table>'
+    : '<div class="empty">No card payments logged yet.</div>';
+  document.getElementById('cardPaymentList').querySelectorAll('.delete-btn').forEach(b => b.onclick = () => deleteTransaction(b.dataset.id));
+}
+
+function openPaymentModal(method, amount){
+  openAddModal();
+  document.getElementById('fType').value = 'cardpayment';
+  populateCategorySelect('cardpayment');
+  populateBucketSelect(null);
+  syncFormMode(null);
+  document.getElementById('fMethod').value = method || '';
+  if (amount) document.getElementById('fAmount').value = amount;
+  document.getElementById('fDescription').value = 'Card bill payment';
+  document.getElementById('modalTitle').textContent = 'Log Card Payment';
+}
+
+function openCardSettings(){
+  const methods = [...new Set([...transactions.map(t => t.method).filter(Boolean), ...cardsCfg.map(c => c.method)])].sort();
+  const cards = effectiveCards();
+  document.getElementById('settingsBody').innerHTML = `
+    <div class="hint-block">Statements run on calendar months: everything spent in a month forms the statement due the following month. Tracking starts from the month you set, so past months without logged payments don't show as fake debt.</div>
+    <div id="cardCfgRows">${cards.map(c => `
+      <div class="card-cfg-row">
+        <div class="settings-row"><label>Card / method</label>
+          <input type="text" class="cc-method" list="ccMethods" value="${escapeAttr(c.method)}"></div>
+        <div class="settings-row"><label>Due day of month</label>
+          <input type="number" class="cc-dueday" min="1" max="28" value="${c.dueDay || 20}"></div>
+        <div class="settings-row"><label>Credit limit <span class="hint">optional</span></label>
+          <input type="number" class="cc-limit" value="${c.creditLimit ?? ''}"></div>
+        <div class="settings-row"><label>Track from</label>
+          <input type="month" class="cc-trackfrom" value="${c.trackFrom || currentYm()}"></div>
+        <div class="settings-row"><label>Opening balance</label>
+          <input type="number" class="cc-opening" value="${c.openingBalance ?? 0}"></div>
+        <button type="button" class="icon-btn cc-del">${icon('trash')} Remove card</button>
+      </div>`).join('')}</div>
+    <datalist id="ccMethods">${methods.map(m => `<option value="${escapeAttr(m)}">`).join('')}</datalist>
+    <button type="button" class="icon-btn" id="cardCfgAdd">${icon('plus')} Add card</button>`;
+
+  const wireDel = () => document.querySelectorAll('.cc-del').forEach(b => b.onclick = () => b.closest('.card-cfg-row').remove());
+  wireDel();
+  document.getElementById('cardCfgAdd').onclick = () => {
+    document.getElementById('cardCfgRows').insertAdjacentHTML('beforeend', `
+      <div class="card-cfg-row">
+        <div class="settings-row"><label>Card / method</label><input type="text" class="cc-method" list="ccMethods"></div>
+        <div class="settings-row"><label>Due day of month</label><input type="number" class="cc-dueday" min="1" max="28" value="20"></div>
+        <div class="settings-row"><label>Credit limit <span class="hint">optional</span></label><input type="number" class="cc-limit"></div>
+        <div class="settings-row"><label>Track from</label><input type="month" class="cc-trackfrom" value="${currentYm()}"></div>
+        <div class="settings-row"><label>Opening balance</label><input type="number" class="cc-opening" value="0"></div>
+        <button type="button" class="icon-btn cc-del">${icon('trash')} Remove card</button>
+      </div>`);
+    wireDel();
+  };
+  document.getElementById('settingsOverlay').dataset.mode = 'cards';
+  document.querySelector('#settingsOverlay h3').textContent = 'Card Settings';
+  document.getElementById('settingsResetBtn').classList.add('hidden');
+  document.getElementById('settingsOverlay').classList.remove('hidden');
+}
+
+function saveCardSettings(){
+  const cards = [...document.querySelectorAll('#cardCfgRows .card-cfg-row')].map(r => ({
+    method: r.querySelector('.cc-method').value.trim(),
+    dueDay: parseInt(r.querySelector('.cc-dueday').value, 10) || 20,
+    creditLimit: r.querySelector('.cc-limit').value === '' ? null : parseFloat(r.querySelector('.cc-limit').value),
+    trackFrom: r.querySelector('.cc-trackfrom').value || currentYm(),
+    openingBalance: parseFloat(r.querySelector('.cc-opening').value) || 0,
+  })).filter(c => c.method);
+  settingsSet('cards', cards);
+  document.getElementById('settingsOverlay').classList.add('hidden');
 }
 
 function renderBudgetTrend(){
@@ -947,13 +1254,20 @@ function openSettings(){
     <div class="settings-row"><label>${escapeHtml(d.label)} <span class="hint">${d.floor!=null?'floor':'cap'}</span></label>
     <input type="number" class="set-subcap" data-bucket="${bid}" data-idx="${i}" value="${d.floor!=null?d.floor:d.cap}"></div>`).join('');
 
+  document.getElementById('settingsOverlay').dataset.mode = 'budget';
+  document.querySelector('#settingsOverlay h3').textContent = 'Budget Settings';
+  document.getElementById('settingsResetBtn').classList.remove('hidden');
   document.getElementById('settingsBody').innerHTML = `
     <h4>Income &amp; bucket budgets (AED/month)</h4>
     <div class="settings-row"><label>Monthly income baseline</label><input type="number" id="setIncome" value="${cfg.monthlyIncome}"></div>
     ${cfg.buckets.filter(b => b.id!=='unmapped').map(b => `
       <div class="settings-row"><label><span class="dot" style="background:${b.color}"></span> ${escapeHtml(b.label)}</label>
-      <input type="number" class="set-budget" data-bucket="${b.id}" value="${b.budget}"></div>`).join('')}
+      <div class="budget-cell"><input type="number" class="set-budget" data-bucket="${b.id}" value="${b.budget}">
+      ${(b.rolling || b.computed) ? '' : `<label class="toggle-inline" title="Carry unspent budget into next month"><input type="checkbox" class="set-rollover" data-bucket="${b.id}" ${b.rollover?'checked':''}> roll over</label>`}</div></div>`).join('')}
     <div class="hint-block" id="setBudgetSum"></div>
+    <h4>Recurring detection</h4>
+    <div class="settings-row"><label>Months before a charge counts as recurring</label><input type="number" id="setRecMonths" min="2" max="12" value="${cfg.recurring.minMonths}"></div>
+    <div class="settings-row"><label>Price-change alert threshold (%)</label><input type="number" id="setRecPct" min="1" max="100" value="${cfg.recurring.changeThresholdPct}"></div>
     <h4>Category → bucket mapping</h4>
     <div class="settings-scroll">
     ${cats.map(c => `<div class="settings-row"><label>${escapeHtml(c)}</label>
@@ -1017,6 +1331,14 @@ function saveSettings(){
     const b = cfg.buckets.find(x => x.id === el.dataset.bucket);
     if (b) b.budget = parseFloat(el.value) || 0;
   });
+  document.querySelectorAll('.set-rollover').forEach(el => {
+    const b = cfg.buckets.find(x => x.id === el.dataset.bucket);
+    if (b) b.rollover = el.checked;
+  });
+  cfg.recurring = {
+    minMonths: parseInt(document.getElementById('setRecMonths').value, 10) || cfg.recurring.minMonths,
+    changeThresholdPct: parseFloat(document.getElementById('setRecPct').value) || cfg.recurring.changeThresholdPct,
+  };
   const newMap = {};
   document.querySelectorAll('.set-map').forEach(el => { if (el.value) newMap[el.dataset.cat] = el.value; });
   cfg.categoryMap = newMap;
@@ -1040,9 +1362,10 @@ function saveSettings(){
 
   settingsSet('budgetConfig', {
     monthlyIncome: cfg.monthlyIncome,
-    buckets: cfg.buckets.map(b => ({ id: b.id, budget: b.budget })),
+    buckets: cfg.buckets.map(b => ({ id: b.id, budget: b.budget, rollover: !!b.rollover })),
     categoryMap: cfg.categoryMap,
     subCaps: cfg.subCaps,
+    recurring: cfg.recurring,
     sinkingFundOpeningBalance: cfg.sinkingFundOpeningBalance,
     priceProxy: cfg.priceProxy,
   });
@@ -1304,18 +1627,33 @@ function wireEventListeners(){
 
   // Budget tab toolbar
   const monthInput = document.getElementById('budgetMonth');
-  monthInput.value = currentYm();
+  budgetMonth = defaultViewMonth();
+  monthInput.value = budgetMonth;
   monthInput.max = currentYm();
   monthInput.addEventListener('change', () => {
-    if (monthInput.value) { budgetMonth = monthInput.value; renderBudget(); }
+    if (monthInput.value) { budgetMonthPicked = true; budgetMonth = monthInput.value; renderBudget(); }
   });
   document.getElementById('budgetAllTimeBtn').addEventListener('click', () => {
-    budgetMonth = budgetMonth === 'all' ? (monthInput.value || currentYm()) : 'all';
+    budgetMonthPicked = true;
+    budgetMonth = budgetMonth === 'all' ? (monthInput.value || defaultViewMonth()) : 'all';
     renderBudget();
   });
+  document.getElementById('excludeOneOff').addEventListener('change', e => { excludeOneOff = e.target.checked; renderBudget(); });
   document.getElementById('openSettingsBtn').addEventListener('click', openSettings);
   document.getElementById('settingsCancelBtn').addEventListener('click', () => document.getElementById('settingsOverlay').classList.add('hidden'));
-  document.getElementById('settingsSaveBtn').addEventListener('click', saveSettings);
+  document.getElementById('settingsSaveBtn').addEventListener('click', () => {
+    if (document.getElementById('settingsOverlay').dataset.mode === 'cards') saveCardSettings();
+    else saveSettings();
+  });
+
+  // Cards tab
+  const cardsMonthInput = document.getElementById('cardsMonth');
+  cardsMonth = defaultViewMonth();
+  cardsMonthInput.value = cardsMonth;
+  cardsMonthInput.max = currentYm();
+  cardsMonthInput.addEventListener('change', () => { if (cardsMonthInput.value) { cardsMonthPicked = true; cardsMonth = cardsMonthInput.value; renderCards(); } });
+  document.getElementById('openCardSettingsBtn').addEventListener('click', openCardSettings);
+  document.getElementById('logPaymentBtn').addEventListener('click', () => openPaymentModal('', ''));
   document.getElementById('settingsResetBtn').addEventListener('click', () => {
     if (!confirm('Reset budgets, mapping and sub-caps to the defaults? Card map and vendor rules are kept.')) return;
     settingsSet('budgetConfig', null);
@@ -1364,6 +1702,18 @@ function wireEventListeners(){
     selectedIds.forEach(id => adapter.transactions.update(id, { category: c }));
     selectedIds.clear(); updateBulkBar();
   });
+  document.getElementById('bulkApplyPerson').addEventListener('click', () => {
+    const p = document.getElementById('bulkPerson').value;
+    selectedIds.forEach(id => adapter.transactions.update(id, { person: p }));
+    selectedIds.clear(); updateBulkBar();
+  });
+  document.getElementById('bulkToggleOneOff').addEventListener('click', () => {
+    // If every selected row is already a one-off, treat the action as "unmark".
+    const rows = [...selectedIds].map(id => transactions.find(t => t.id === id)).filter(Boolean);
+    const allOne = rows.length > 0 && rows.every(t => t.oneOff);
+    rows.forEach(t => adapter.transactions.update(t.id, { oneOff: allOne ? null : true }));
+    selectedIds.clear(); updateBulkBar();
+  });
   document.getElementById('bulkCancel').addEventListener('click', () => { selectedIds.clear(); renderTable(); updateBulkBar(); });
 
   document.getElementById('refreshPricesBtn').addEventListener('click', () => refreshPrices(true));
@@ -1372,12 +1722,14 @@ function wireEventListeners(){
   document.getElementById('filterType').addEventListener('change', e => { tableFilters.type = e.target.value; currentPage = 1; renderTable(); });
   document.getElementById('filterCategory').addEventListener('change', e => { tableFilters.category = e.target.value; currentPage = 1; renderTable(); });
   document.getElementById('filterMethod').addEventListener('change', e => { tableFilters.method = e.target.value; currentPage = 1; renderTable(); });
+  document.getElementById('filterPerson').addEventListener('change', e => { tableFilters.person = e.target.value; currentPage = 1; renderTable(); });
   document.getElementById('clearFilters').addEventListener('click', () => {
-    tableFilters = {search:'', type:'', category:'', method:''};
+    tableFilters = {search:'', type:'', category:'', method:'', person:''};
     document.getElementById('searchBox').value = '';
     document.getElementById('filterType').value = '';
     document.getElementById('filterCategory').value = '';
     document.getElementById('filterMethod').value = '';
+    document.getElementById('filterPerson').value = '';
     currentPage = 1; renderTable();
   });
   document.getElementById('applyRange').addEventListener('click', () => {
@@ -1404,6 +1756,7 @@ function wireEventListeners(){
   document.getElementById('fType').addEventListener('change', () => {
     populateCategorySelect(document.getElementById('fType').value);
     populateBucketSelect(null);
+    syncFormMode(null);
   });
   document.getElementById('fCategory').addEventListener('change', () => {
     const sel = document.getElementById('fCategory');
@@ -1429,6 +1782,8 @@ function wireEventListeners(){
       method: document.getElementById('fMethod').value.trim(),
       notes: document.getElementById('fNotes').value.trim(),
       bucketOverride: (bucketSel && bucketSel !== 'auto') ? bucketSel : null,
+      person: document.getElementById('fPerson').value || null,
+      oneOff: document.getElementById('fOneOff').checked || null,
     };
     if (payload.category === '__new__') { alert('Pick or create a category first.'); return; }
     if (editingId) adapter.transactions.update(editingId, payload);

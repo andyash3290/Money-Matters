@@ -45,6 +45,10 @@
     <symbol id="icon-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
     <symbol id="icon-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></symbol>
     <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
+    <symbol id="icon-card" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></symbol>
+    <symbol id="icon-repeat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></symbol>
+    <symbol id="icon-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="icon-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></symbol>
   </defs>
 </svg>
 
@@ -85,6 +89,7 @@
   <nav class="tabs">
     <button class="tab-btn active" data-tab="expenses"><svg class="icon"><use href="#icon-list"></use></svg> Expenses</button>
     <button class="tab-btn" data-tab="budget"><svg class="icon"><use href="#icon-percent"></use></svg> Budget</button>
+    <button class="tab-btn" data-tab="cards"><svg class="icon"><use href="#icon-card"></use></svg> Cards</button>
     <button class="tab-btn" data-tab="networth"><svg class="icon"><use href="#icon-piechart"></use></svg> Net Worth</button>
   </nav>
 
@@ -145,6 +150,7 @@
         <select id="filterType"><option value="">All Types</option><option value="income">Income</option><option value="expense">Expense</option><option value="savings">Savings</option></select>
         <select id="filterCategory"><option value="">All Categories</option></select>
         <select id="filterMethod"><option value="">All Methods</option></select>
+        <select id="filterPerson"><option value="">All People</option></select>
         <button id="clearFilters"><svg class="icon"><use href="#icon-x"></use></svg> Clear Filters</button>
         <button id="exportCsv"><svg class="icon"><use href="#icon-download"></use></svg> Export CSV</button>
       </div>
@@ -154,6 +160,9 @@
         <button id="bulkApplyBucket">Set bucket</button>
         <select id="bulkCategory"></select>
         <button id="bulkApplyCategory">Set category</button>
+        <select id="bulkPerson"></select>
+        <button id="bulkApplyPerson">Set person</button>
+        <button id="bulkToggleOneOff">Mark one-off</button>
         <button id="bulkClearOverride">Clear override</button>
         <button id="bulkCancel"><svg class="icon"><use href="#icon-x"></use></svg></button>
       </div>
@@ -183,7 +192,8 @@
         <input type="month" id="budgetMonth" min="2026-02">
         <button id="budgetAllTimeBtn">All time</button>
       </div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <label class="toggle-inline"><input type="checkbox" id="excludeOneOff"> Exclude one-offs</label>
         <button id="openSettingsBtn"><svg class="icon"><use href="#icon-sliders"></use></svg> Budget Settings</button>
         <button id="openCleanupBtn"><svg class="icon"><use href="#icon-check"></use></svg> Clean Up Data</button>
       </div>
@@ -205,6 +215,14 @@
         <h3>Bucket Budgets</h3>
         <div id="bucketBars"></div>
       </div>
+      <div class="panel">
+        <h3><svg class="icon"><use href="#icon-users"></use></svg> Who Spent It</h3>
+        <div id="personPanel"></div>
+      </div>
+      <div class="panel">
+        <h3><svg class="icon"><use href="#icon-repeat"></use></svg> Recurring Charges</h3>
+        <div id="recurringPanel"></div>
+      </div>
       <div class="panel wide">
         <h3>Monthly Trend by Bucket</h3>
         <div id="budgetTrendWrap" style="overflow-x:auto;"></div>
@@ -214,6 +232,24 @@
         <h3><svg class="icon"><use href="#icon-alert"></use></svg> Leak Alerts</h3>
         <div id="leakAlerts"></div>
       </div>
+    </section>
+  </section>
+
+  <section class="tab-panel" id="tab-cards">
+    <div class="budget-toolbar">
+      <div class="budget-month-wrap">
+        <input type="month" id="cardsMonth" min="2026-02">
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="logPaymentBtn" class="btn-primary"><svg class="icon"><use href="#icon-plus"></use></svg> Log card payment</button>
+        <button id="openCardSettingsBtn"><svg class="icon"><use href="#icon-sliders"></use></svg> Card Settings</button>
+      </div>
+    </div>
+    <section class="summary-cards" id="cardTiles"></section>
+    <div class="card-grid" id="cardGrid"></div>
+    <section class="table-section" style="margin-top:16px;">
+      <h3 style="margin:0 0 12px;">Recent card payments</h3>
+      <div id="cardPaymentList"></div>
     </section>
   </section>
 
@@ -261,7 +297,7 @@
     <h3 id="modalTitle">Add Transaction</h3>
     <form id="txForm">
       <label>Type
-        <select id="fType"><option value="expense">Expense</option><option value="income">Income</option><option value="savings">Savings &amp; Investment</option></select>
+        <select id="fType"><option value="expense">Expense</option><option value="income">Income</option><option value="savings">Savings &amp; Investment</option><option value="cardpayment">Credit card payment</option></select>
       </label>
       <label>Date
         <input type="date" id="fDate" required>
@@ -282,9 +318,13 @@
       <label>Notes
         <input id="fNotes" autocomplete="off">
       </label>
+      <label id="fPersonWrap">Person
+        <select id="fPerson"></select>
+      </label>
       <label id="fBucketWrap">Budget bucket
         <select id="fBucket"></select>
       </label>
+      <label class="toggle-inline" id="fOneOffWrap"><input type="checkbox" id="fOneOff"> One-off <span class="hint">— excluded from run-rate</span></label>
       <div class="modal-actions">
         <button type="button" id="cancelBtn">Cancel</button>
         <button type="submit" class="btn-primary">Save</button>

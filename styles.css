@@ -297,9 +297,55 @@ td.amount{font-feature-settings:"tnum"; font-variant-numeric:tabular-nums; font-
 .pl-chip.down{background:rgba(239,68,68,0.15); color:var(--red);}
 .price-status{font-size:11.5px; color:var(--text-soft); max-width:340px;}
 
+/* ---------- Recurring, people, one-offs, cards ---------- */
+.toggle-inline{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text-soft); font-weight:500; cursor:pointer; white-space:nowrap;}
+.toggle-inline input{accent-color:var(--primary); margin:0;}
+.tile-note{font-size:11px; color:var(--text-soft); font-weight:500; margin-top:4px; line-height:1.4;}
+.budget-cell{display:flex; align-items:center; gap:10px;}
+.budget-cell input{flex:1; min-width:0;}
+
+.recurring-row{display:grid; grid-template-columns:1fr auto auto auto; gap:10px; align-items:center; padding:8px 6px; border-bottom:1px solid var(--border); font-size:13px;}
+.end-rec-btn{opacity:0; transition:opacity 0.15s; padding:3px 6px; margin:0;}
+.recurring-row:hover .end-rec-btn{opacity:1;}
+@media (hover:none){ .end-rec-btn{opacity:0.6;} }
+.recurring-row:last-child{border-bottom:none;}
+.rec-label{font-weight:600;}
+.rec-cat{font-size:11px;}
+.rec-amt{text-align:right; font-weight:700; font-feature-settings:"tnum"; font-variant-numeric:tabular-nums; white-space:nowrap;}
+.rec-change{font-size:10.5px; font-weight:700;}
+.rec-change.up{color:var(--red);} .rec-change.down{color:var(--green);}
+.recurring-row.up{background:rgba(239,68,68,0.06); border-radius:8px;}
+.recurring-row.down{background:rgba(16,185,129,0.06); border-radius:8px;}
+.spark{display:flex; align-items:flex-end; gap:2px; height:26px; width:62px;}
+.spark-bar{flex:1; background:var(--primary); opacity:0.55; border-radius:2px 2px 0 0; min-height:3px;}
+.recurring-row.up .spark-bar:last-child{background:var(--red); opacity:1;}
+.recurring-row.down .spark-bar:last-child{background:var(--green); opacity:1;}
+
+.person-row{cursor:pointer; border-radius:9px; padding:3px 4px; transition:background-color 0.15s;}
+.person-row:hover{background:var(--bg-soft);}
+.person-chip{font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:10px; margin-left:5px; text-transform:uppercase; letter-spacing:0.02em; vertical-align:1px;}
+.ovr-badge.one{color:var(--amber);}
+.badge.cardpayment{background:rgba(148,163,184,0.2); color:var(--text-soft);}
+.amount.cardpayment{color:var(--text-soft);}
+
+.card-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(280px,1fr)); gap:14px;}
+.card-card .asset-balance{margin:8px 0 0;}
+.card-card .asset-balance.negative{color:var(--red);}
+.card-lines{display:flex; flex-direction:column; gap:5px; margin-top:12px; padding-top:10px; border-top:1px dashed var(--border); font-size:12.5px;}
+.card-lines > div{display:flex; justify-content:space-between; align-items:center; gap:10px;}
+.card-lines strong{font-feature-settings:"tnum"; font-variant-numeric:tabular-nums;}
+.card-cfg-row{border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px;}
+.card-cfg-row .settings-row:last-of-type{margin-bottom:10px;}
+.alert-row button.icon-btn{margin-left:auto; flex-shrink:0; border-color:transparent;}
+
 @media (max-width: 800px){
   .summary-cards{grid-template-columns:1fr 1fr;}
   .budget-tiles{grid-template-columns:1fr 1fr;}
+  .recurring-row{grid-template-columns:1fr auto auto;}
+  .spark{display:none;}
+  .card-grid{grid-template-columns:1fr;}
+  .tabs{overflow-x:auto; -webkit-overflow-scrolling:touch;}
+  .tab-btn{white-space:nowrap; padding:11px 14px;}
   .charts-grid{grid-template-columns:1fr;}
   table{display:block; overflow-x:auto;}
   .topbar{margin:0 -16px 12px; padding-left:16px; padding-right:16px;}
