@@ -62,13 +62,24 @@ let scanCandidates = [];
 let lastPriceFetchAt = 0;
 
 function settingsGet(id){ const d = settingsDocs.find(s => s.id === id); return d ? d.data : null; }
-function settingsSet(id, data){
-  const next = settingsDocs.filter(s => s.id !== id).concat([{ id, data }]);
+// Write several settings docs at once. Each call replaces the whole collection,
+// and in cloud mode the local copy only refreshes on the next snapshot — so
+// consecutive single writes would overwrite one another. Always batch.
+function settingsSetMany(entries){
+  const ids = new Set(entries.map(e => e.id));
+  const next = settingsDocs.filter(s => !ids.has(s.id)).concat(entries.filter(e => e.data !== null));
+  settingsDocs = next;
   adapter.settings.replaceAll(next);
 }
+function settingsSet(id, data){ settingsSetMany([{ id, data }]); }
 function applySettingsDocs(items){
   settingsDocs = items;
   budgetConfig = mergeBudgetConfig(settingsGet('budgetConfig'));
+  // Rollover lives in its own doc rather than inside budgetConfig: the mobile
+  // app (mobile.html) also writes budgetConfig when you edit a budget there,
+  // and would otherwise silently reset these flags.
+  const roll = settingsGet('bucketRollover');
+  if (Array.isArray(roll)) budgetConfig.buckets.forEach(b => { if (!b.rolling && !b.computed) b.rollover = roll.includes(b.id); });
   cardMap = settingsGet('cardMap') || [];
   vendorRules = settingsGet('vendorRules') || [];
   customCategories = settingsGet('categoryList') || [];
@@ -1360,17 +1371,20 @@ function saveSettings(){
     category: r.querySelector('.vr-cat').value,
   })).filter(r => r.pattern);
 
-  settingsSet('budgetConfig', {
-    monthlyIncome: cfg.monthlyIncome,
-    buckets: cfg.buckets.map(b => ({ id: b.id, budget: b.budget, rollover: !!b.rollover })),
-    categoryMap: cfg.categoryMap,
-    subCaps: cfg.subCaps,
-    recurring: cfg.recurring,
-    sinkingFundOpeningBalance: cfg.sinkingFundOpeningBalance,
-    priceProxy: cfg.priceProxy,
-  });
-  settingsSet('cardMap', cards);
-  settingsSet('vendorRules', rules);
+  settingsSetMany([
+    { id:'bucketRollover', data: cfg.buckets.filter(b => b.rollover && !b.rolling && !b.computed).map(b => b.id) },
+    { id:'budgetConfig', data: {
+      monthlyIncome: cfg.monthlyIncome,
+      buckets: cfg.buckets.map(b => ({ id: b.id, budget: b.budget })),
+      categoryMap: cfg.categoryMap,
+      subCaps: cfg.subCaps,
+      recurring: cfg.recurring,
+      sinkingFundOpeningBalance: cfg.sinkingFundOpeningBalance,
+      priceProxy: cfg.priceProxy,
+    }},
+    { id:'cardMap', data: cards },
+    { id:'vendorRules', data: rules },
+  ]);
   document.getElementById('settingsOverlay').classList.add('hidden');
 }
 
